@@ -1,89 +1,40 @@
-# main.py
-# The core code for the Manny Finance MVP (Definitive Final Version)
+# app/main.py
+# The definitive, final version for the Manny Finance MVP.
+# This file includes fixes for Python imports and Streamlit state management.
 # As of: August 17, 2025, Chennai
 
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-# --- CHANGE 1: Import BOTH the endpoint and the chat wrapper ---
-from langchain_huggingface import HuggingFaceEndpoint
-from langchain_huggingface.chat_models import ChatHuggingFace
-from langchain_core.messages import HumanMessage, SystemMessage
+# --- FIX 1: The Definitive Import Fix ---
+# This block programmatically adds the project's root directory to Python's path.
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# --- END OF IMPORT FIX ---
+
+import streamlit as st
+
+# Import our separated logic using the absolute imports that now work
+from app.utils import get_stock_info
+from app.ai_core import get_ai_response
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Manny Finance MVP", layout="wide")
 st.title("Manny Finance MVP 🚀")
 st.write("A conversational AI analyst for the Indian stock market (Powered by Open Source AI).")
 
+# --- FIX 2: Session State for Robustness ---
+# Initialize Session State to hold the AI answer.
+if 'ai_answer' not in st.session_state:
+    st.session_state.ai_answer = ""
+
 # --- API Key Management ---
 api_key_input = st.sidebar.text_input("Enter your Hugging Face API Token", type="password")
 if api_key_input:
     os.environ["HUGGINGFACEHUB_API_TOKEN"] = api_key_input
 
-# --- Helper Function: Data Fetching (No changes) ---
-@st.cache_data(ttl=900)
-def get_stock_info(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        if stock.history(period="1d").empty:
-            st.error(f"No data found for ticker '{ticker}'. It might be delisted or an invalid ticker. Please check.")
-            return None
-        info = stock.info
-        key_info = {
-            "Company Name": info.get("longName"), "Sector": info.get("sector"), "Industry": info.get("industry"),
-            "Market Cap": f"₹{info.get('marketCap', 0):,}", "Price-to-Earnings (P/E) Ratio": info.get("trailingPE"),
-            "Dividend Yield": f"{info.get('dividendYield', 0) * 100:.2f}%", "52 Week High": info.get("fiftyTwoWeekHigh"),
-            "52 Week Low": info.get("fiftyTwoWeekLow"), "Business Summary": info.get("longBusinessSummary"),
-        }
-        if not key_info["Company Name"]:
-            st.warning(f"Successfully fetched ticker '{ticker}', but detailed information is sparse.")
-        return key_info
-    except Exception as e:
-        st.error(f"An unexpected error occurred while fetching data for {ticker}. Error: {e}")
-        return None
-
-# --- AI Core Function ---
-def get_ai_response(data, question):
-    """Generates an AI response using a chat-based model on Hugging Face."""
-    if not data:
-        return "Could not generate a response as data fetching failed."
-    if not os.getenv("HUGGINGFACEHUB_API_TOKEN"):
-        return "Hugging Face API Token is not set. Please enter it in the sidebar."
-
-    repo_id = "HuggingFaceH4/zephyr-7b-beta"
-    
-    # --- CHANGE 2: The Correct Assembly ---
-    # First, define the connection to the Hugging Face model endpoint.
-    llm = HuggingFaceEndpoint(
-        repo_id=repo_id,
-        max_new_tokens=512,
-        temperature=0.1,
-    )
-    
-    # Second, wrap the endpoint connection with the ChatHuggingFace class.
-    # The error told us the 'llm' field was required, so we provide it.
-    chat_model = ChatHuggingFace(llm=llm)
-
-    # Format the prompt as a series of messages for the chat model
-    system_prompt = """You are Manny, an expert financial analyst AI assistant for the Indian market. Your role is to provide clear, concise, and helpful answers based ONLY on the context data provided. Do not use any external knowledge or make up information. If the answer cannot be found in the context, clearly state "The answer is not available in the provided data." """
-    human_prompt = f"CONTEXT DATA:\n{str(data)}\n\nUSER'S QUESTION:\n{question}"
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_prompt),
-    ]
-
-    try:
-        result = chat_model.invoke(messages)
-        return result.content
-    except Exception as e:
-        st.error(f"An error occurred while communicating with the AI model: {e}")
-        return "Sorry, I was unable to generate a response. This could be a temporary issue with the AI service. Please try again."
-
-# --- Streamlit Application UI (No changes) ---
+# --- Streamlit Application UI ---
 st.subheader("Analyze an Indian Stock")
 ticker_input = st.text_input("Enter the NSE/BSE Ticker (e.g., RELIANCE.NS, INFY.NS, HDFCBANK.BO)", "INFY.NS")
-question_input = st.text_input("What is the company's main business and what is its P/E ratio?")
+question_input = st.text_input("What would you like to know?", "What is the company's main business and what is its P/E ratio?")
 
 if st.button("Ask Manny"):
     if not ticker_input:
@@ -98,6 +49,13 @@ if st.button("Ask Manny"):
             st.subheader("📊 Raw Data Fetched from yfinance:")
             st.json(stock_data)
             with st.spinner("Manny is analyzing the data..."):
-                ai_answer = get_ai_response(stock_data, question_input)
-            st.subheader("🤖 Manny's Answer:")
-            st.markdown(ai_answer)
+                # Store the result directly into the session state
+                st.session_state.ai_answer = get_ai_response(stock_data, question_input)
+        else:
+            # Clear previous answer if data fetching fails
+            st.session_state.ai_answer = ""
+
+# --- Display the AI's Answer from Session State ---
+if st.session_state.ai_answer:
+    st.subheader("🤖 Manny's Answer:")
+    st.markdown(st.session_state.ai_answer)
